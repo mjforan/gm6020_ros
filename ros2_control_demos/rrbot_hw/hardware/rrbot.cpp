@@ -37,82 +37,50 @@ hardware_interface::CallbackReturn RRBotSystemEffortOnlyHardware::on_init(
 
   hw_states_position_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
   hw_states_velocity_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_states_effort_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_commands_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  hw_states_effort_  .resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  hw_commands_speed_ .resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  hw_commands_effort_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
 
-  for (const hardware_interface::ComponentInfo & joint : info_.joints)
-  {
-    // RRBotSystemEffortOnly has exactly one state and command interface on each joint
-    if (joint.command_interfaces.size() != 1)
-    {
-      RCLCPP_FATAL(
-        rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
-        "Joint '%s' has %zu command interfaces found. 1 expected.", joint.name.c_str(),
-        joint.command_interfaces.size());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
+  // Loop through {command, state} interfaces and make sure they are the right number and type
+  for (const hardware_interface::ComponentInfo & joint : info_.joints){
+    const char interface_classes[][] = {"command", "state"}; // Just for debug output
+    hardware_interface::ComponentInfo interface_infos[][] = {joint.command_interfaces, joint.state_interfaces}
+    for (int i=0; i<sizeof(interface_types)/sizeof(interface_types)[0]; i++){
+      const int len = sizeof(command_interface_types[i])/sizeof(command_interface_types[i][0]);
 
-    if (joint.command_interfaces[0].name != hardware_interface::HW_IF_EFFORT)
-    {
-      RCLCPP_FATAL(
-        rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
-        "Joint '%s' have %s command interfaces found. '%s' expected.", joint.name.c_str(),
-        joint.command_interfaces[0].name.c_str(), hardware_interface::HW_IF_EFFORT);
-      return hardware_interface::CallbackReturn::ERROR;
-    }
+      if (interface_infos[i].size() != len){
+        RCLCPP_FATAL(
+          rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
+          "Joint '%s' has %zu %s interfaces. %zu expected.", joint.name.c_str(),
+          interface_infos[i].size(), interface_classes[i], len);
+        return hardware_interface::CallbackReturn::ERROR;
+      }
 
-    if (joint.state_interfaces.size() != 3)
-    {
-      RCLCPP_FATAL(
-        rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
-        "Joint '%s' has %zu state interface. 3 expected.", joint.name.c_str(),
-        joint.state_interfaces.size());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    if (joint.state_interfaces[0].name != hardware_interface::HW_IF_POSITION)
-    {
-      RCLCPP_FATAL(
-        rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
-        "Joint '%s' have %s state interface. '%s' expected.", joint.name.c_str(),
-        joint.state_interfaces[0].name.c_str(), hardware_interface::HW_IF_POSITION);
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-    if (joint.state_interfaces[1].name != hardware_interface::HW_IF_VELOCITY)
-    {
-      RCLCPP_FATAL(
-        rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
-        "Joint '%s' have %s state interface. '%s' expected.", joint.name.c_str(),
-        joint.state_interfaces[0].name.c_str(), hardware_interface::HW_IF_VELOCITY);
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-    if (joint.state_interfaces[2].name != hardware_interface::HW_IF_EFFORT)
-    {
-      RCLCPP_FATAL(
-        rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
-        "Joint '%s' have %s state interface. '%s' expected.", joint.name.c_str(),
-        joint.state_interfaces[0].name.c_str(), hardware_interface::HW_IF_EFFORT);
-      return hardware_interface::CallbackReturn::ERROR;
+      for(int j=0; j<len; j++)
+        if (interface_infos[i][j].name != command_interface_types[i][j]){
+          RCLCPP_FATAL(
+            rclcpp::get_logger("RRBotSystemEffortOnlyHardware"),
+            "Joint '%s' has %s %s interfaces. '%s' expected.", joint.name.c_str(),
+            interface_infos[i][i].name.c_str(), interface_classes[i], interface_types[i][j]);
+          return hardware_interface::CallbackReturn::ERROR;
+        }
     }
   }
-
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::CallbackReturn RRBotSystemEffortOnlyHardware::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  // BEGIN: This part here is for exemplary purposes - Please do not copy to your production code
   RCLCPP_INFO(
     rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Configuring ...please wait...");
 
-  // reset values always when configuring hardware
-  for (uint i = 0; i < hw_states_position_.size(); i++)
-  {
-    hw_states_position_[i] = 0;
-    hw_states_velocity_[i] = 0;
-    hw_states_effort_[i] = 0;
-    hw_commands_[i] = 0;
+  // reset state and command values before connecting
+  for (uint i = 0; i < hw_states_[0].size(); i++){
+    for (uint j = 0; j < num_command; j++)
+      hw_commands_[j][i] = 0;
+    for (uint j = 0; j < num_state; j++)
+      hw_states_[j][i] = 0;
   }
 
   RCLCPP_INFO(rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Successfully configured!");
@@ -125,14 +93,8 @@ RRBotSystemEffortOnlyHardware::export_state_interfaces()
 {
   std::vector<hardware_interface::StateInterface> state_interfaces;
   for (uint i = 0; i < info_.joints.size(); i++)
-  {
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-      info_.joints[i].name, hardware_interface::HW_IF_POSITION, &hw_states_position_[i]));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-      info_.joints[i].name, hardware_interface::HW_IF_VELOCITY, &hw_states_velocity_[i]));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-      info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_states_effort_[i]));
-  }
+    for (const char[] s : interface_types[InterfaceClass::STATE])
+      state_interfaces.emplace_back(hardware_interface::StateInterface(info_.joints[i].name, s, &hw_states_[j][i]));
 
   return state_interfaces;
 }
@@ -142,10 +104,8 @@ RRBotSystemEffortOnlyHardware::export_command_interfaces()
 {
   std::vector<hardware_interface::CommandInterface> command_interfaces;
   for (uint i = 0; i < info_.joints.size(); i++)
-  {
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(
-      info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_commands_[i]));
-  }
+    for (const char[] s : interface_types[InterfaceClass::COMMAND])
+      command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name, s, &hw_commands_[j][i]));
 
   return command_interfaces;
 }
@@ -153,22 +113,13 @@ RRBotSystemEffortOnlyHardware::export_command_interfaces()
 hardware_interface::CallbackReturn RRBotSystemEffortOnlyHardware::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-
-  // command and state should be equal when starting
-  for (uint i = 0; i < hw_states_position_.size(); i++)
-  {
-    hw_commands_[i] = hw_states_effort_[i];
-  }
-
   RCLCPP_INFO(rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Successfully activated!");
-
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::CallbackReturn RRBotSystemEffortOnlyHardware::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -181,9 +132,9 @@ hardware_interface::return_type RRBotSystemEffortOnlyHardware::read(
   for (uint i = 0; i < hw_states_position_.size(); i++)
   {
     // Simulate RRBot's movement
-    hw_states_effort_[i] = hw_commands_[i];
-    hw_states_velocity_[i] += (hw_commands_[i]*0.5 - hw_states_velocity_[i])/2;
-    hw_states_position_[i] += hw_states_velocity_[i]*0.5;
+    hw_states_[2][i] = hw_commands_[1][i];
+    hw_states_[1][i] += (hw_commands_[1][i]*0.5 - hw_states_[1][i])/2;
+    hw_states_[0][i] += hw_states_[1][i]*0.5;
   }
   RCLCPP_INFO(rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Joints successfully read!");
   // END: This part here is for exemplary purposes - Please do not copy to your production code
@@ -194,20 +145,6 @@ hardware_interface::return_type RRBotSystemEffortOnlyHardware::read(
 hardware_interface::return_type RRBotSystemEffortOnlyHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // BEGIN: This part here is for exemplary purposes - Please do not copy to your production code
-  RCLCPP_INFO(rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Writing...");
-
-  for (uint i = 0; i < hw_commands_.size(); i++)
-  {
-    // Simulate sending commands to the hardware
-    RCLCPP_INFO(
-      rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Got command %.5f for joint %d!",
-      hw_commands_[i], i);
-  }
-  RCLCPP_INFO(
-    rclcpp::get_logger("RRBotSystemEffortOnlyHardware"), "Joints successfully written!");
-  // END: This part here is for exemplary purposes - Please do not copy to your production code
-
   return hardware_interface::return_type::OK;
 }
 

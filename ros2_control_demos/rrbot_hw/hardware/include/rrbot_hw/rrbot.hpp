@@ -29,6 +29,13 @@
 
 namespace rrbot_hw
 {
+
+enum InterfaceClass {
+  COMMAND,
+  STATE,
+  last
+}
+
 class RRBotSystemEffortOnlyHardware : public hardware_interface::SystemInterface
 {
 public:
@@ -57,12 +64,13 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
-  // Store the command for the simulated robot
-  std::vector<double> hw_commands_;
-  std::vector<double> hw_states_position_;
-  std::vector<double> hw_states_velocity_;
-  std::vector<double> hw_states_effort_;
+  const char command_interface_types []* = {hardware_interface::HW_IF_VELOCITY, hardware_interface::HW_IF_EFFORT};
+  const char state_interface_types []* = {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY, hardware_interface::HW_IF_EFFORT};
+  const int num_state = sizeof(state_interface_types)/sizeof(state_interface_types[0])
+  const int num_command = sizeof(command_interface_types)/sizeof(command_interface_types[0])
 
+  std::vector<double> hw_commands_[num_command];
+  std::vector<double> hw_states_[num_state];
 };
 
 }  // namespace rrbot_hw
